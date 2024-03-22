@@ -726,7 +726,7 @@ esp_err_t spi_flash_common_set_io_mode(esp_flash_t *chip, esp_flash_wrsr_func_t 
      * chips (MXIC) no longer valid.
      * Enable this option when testing a new flash chip for clearing of QE.
      */
-    const bool force_check = false;
+    const bool force_check = true;
 
     bool need_check = is_quad_mode || force_check;
 
