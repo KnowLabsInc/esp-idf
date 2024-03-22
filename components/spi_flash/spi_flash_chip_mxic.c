@@ -85,6 +85,11 @@ static esp_err_t spi_flash_command_mxic_program_page(esp_flash_t *chip, const vo
         if (err == ESP_OK) {
             chip->busy = 1;
             err = chip->chip_drv->wait_idle(chip, chip->chip_drv->timeout->page_program_timeout);
+            if (err == ESP_ERR_NOT_SUPPORTED) {
+                ESP_LOGW(TAG, "Idle after program fail, cmd: %02x, address: %08lx", t.command, address);
+                err = ESP_OK;
+            }
+        }
     }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Program %02x @ %08lx = %d", ADDR_32BIT(address) ? CMD_PROGRAM_PAGE_4B : CMD_PROGRAM_PAGE_4B, address, err);
@@ -111,6 +116,10 @@ static esp_err_t spi_flash_command_mcix_erase(esp_flash_t *chip, uint32_t start_
             if (err == ESP_OK) {
                 chip->busy = 1;
                 err = chip->chip_drv->wait_idle(chip, timeout);
+                if (err == ESP_ERR_NOT_SUPPORTED) {
+                    ESP_LOGW(TAG, "Idle after erase fail, cmd: %02x, address: %08lx", t.command, start_address);
+                    err = ESP_OK;
+                }
             }
             //SET_FLASH_ERASE_STATUS(chip, 0);
         }
