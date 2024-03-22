@@ -438,7 +438,9 @@ esp_err_t spi_flash_chip_generic_wait_idle(esp_flash_t *chip, uint32_t timeout_u
 
     uint8_t status = 0;
     const int interval = CHIP_WAIT_IDLE_INTERVAL_US;
+    int l = 0;
     while (timeout_us > 0) {
+        l++;
         while (!chip->host->driver->host_status(chip->host) && timeout_us > 0) {
 
 #if HOST_DELAY_INTERVAL_US > 0
@@ -461,6 +463,7 @@ esp_err_t spi_flash_chip_generic_wait_idle(esp_flash_t *chip, uint32_t timeout_u
             if (chip->busy == 1) {
                 chip->busy = 0;
                 if ((status & SR_WREN) != 0) { // The previous command is not accepted, leaving the WEL still set.
+                    ESP_EARLY_LOGE(TAG, "WIP unset but WEL still set (%02x), cycle %d", status, l);
                     return ESP_ERR_NOT_SUPPORTED;
                 }
             }
