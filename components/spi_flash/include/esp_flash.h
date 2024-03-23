@@ -103,7 +103,10 @@ struct esp_flash_t {
     uint32_t chip_id;               ///< Detected chip id.
     uint32_t busy             :1;   ///< This flag is used to verify chip's status.
     uint32_t hpm_dummy_ena    :1;   ///< This flag is used to verify whether flash works under HPM status.
-    uint32_t reserved_flags   :30;  ///< reserved.
+    uint32_t read_cmd         :8;   ///< Command used to read flash
+    uint32_t dummylen         :4;   ///< Dummy cycles, divided by two
+    uint32_t addr32	      :1;   ///< Use 32 bit read addresses
+    uint32_t reserved_flags   :17;  ///< reserved.
 };
 
 

@@ -38,17 +38,15 @@ esp_err_t spi_flash_chip_mxic_probe(esp_flash_t *chip, uint32_t flash_id)
     return ESP_OK;
 }
 
-esp_err_t spi_flash_chip_issi_set_io_mode(esp_flash_t *chip);
 esp_err_t spi_flash_chip_issi_get_io_mode(esp_flash_t *chip, esp_flash_io_mode_t* out_io_mode);
 
 // Use the same implementation as ISSI chips
-#define spi_flash_chip_mxic_set_io_mode spi_flash_chip_issi_set_io_mode
 #define spi_flash_chip_mxic_get_io_mode spi_flash_chip_issi_get_io_mode
 #define spi_flash_chip_mxic_read_reg        spi_flash_chip_generic_read_reg
 
 static const char chip_name[] = "mxic";
 
-spi_flash_caps_t spi_flash_chip_mxic_get_caps(esp_flash_t *chip)
+static spi_flash_caps_t spi_flash_chip_mxic_get_caps(esp_flash_t *chip)
 {
     spi_flash_caps_t caps_flags = 0;
     if ((chip->chip_id & 0xFF) >= 0x19) {
@@ -59,10 +57,71 @@ spi_flash_caps_t spi_flash_chip_mxic_get_caps(esp_flash_t *chip)
     return caps_flags;
 }
 
-esp_err_t spi_flash_chip_mxic_detect_size(esp_flash_t *chip, uint32_t *size)
+static esp_err_t spi_flash_chip_mxic_detect_size(esp_flash_t *chip, uint32_t *size)
 {
     *size = 1 << (chip->chip_id & 0xff);
     return ESP_OK;
+}
+
+static esp_err_t spi_flash_chip_mxic_setup_host_io(esp_flash_t *chip)
+{
+    const bool addr_32bit = chip->chip_drv->get_chip_caps(chip) & SPI_FLASH_CHIP_CAP_32MB_SUPPORT;
+    chip->addr32 = addr_32bit;
+
+    switch (chip->read_mode & 0xFFFF) {
+    case SPI_FLASH_QIO:
+	chip->read_cmd = addr_32bit ? CMD_FASTRD_QIO_4B : CMD_FASTRD_QIO;
+	chip->dummylen = SPI_FLASH_QIO_DUMMY_BITLEN / 2;
+        break;
+    case SPI_FLASH_QOUT:
+	chip->read_cmd = addr_32bit ? CMD_FASTRD_QUAD_4B : CMD_FASTRD_QUAD;
+	chip->dummylen = SPI_FLASH_QOUT_DUMMY_BITLEN / 2;
+        break;
+    case SPI_FLASH_DIO:
+	chip->read_cmd = addr_32bit ? CMD_FASTRD_DIO_4B : CMD_FASTRD_DIO;
+	chip->dummylen = SPI_FLASH_DIO_DUMMY_BITLEN / 2;
+        break;
+    case SPI_FLASH_DOUT:
+	chip->read_cmd = addr_32bit ? CMD_FASTRD_DUAL_4B : CMD_FASTRD_DUAL;
+	chip->dummylen = SPI_FLASH_DOUT_DUMMY_BITLEN / 2;
+        break;
+    case SPI_FLASH_FASTRD:
+	chip->read_cmd = addr_32bit ? CMD_FASTRD_4B : CMD_FASTRD;
+	chip->dummylen = SPI_FLASH_FASTRD_DUMMY_BITLEN / 2;
+        break;
+    case SPI_FLASH_SLOWRD:
+	chip->read_cmd = addr_32bit ? CMD_READ_4B : CMD_READ;
+	chip->dummylen = SPI_FLASH_SLOWRD_DUMMY_BITLEN / 2;
+        break;
+    default:
+        return ESP_ERR_FLASH_NOT_INITIALISED;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t spi_flash_chip_mxic_set_io_mode(esp_flash_t *chip)
+{
+    /* MXIC uses bit 6 of "basic" SR as Quad Enable */
+    //ESP_LOGI(TAG, "set io mode");
+    const uint8_t BIT_QE = 1 << 6;
+    esp_err_t ret = spi_flash_common_set_io_mode(chip,
+                                                 spi_flash_common_write_status_8b_wrsr,
+                                                 spi_flash_common_read_status_8b_rdsr,
+                                                 BIT_QE);
+
+    if (ret == ESP_OK) {
+	// ESP_LOGI(TAG, "configure io mode values");
+	ret = spi_flash_chip_mxic_setup_host_io(chip);
+    }
+    return ret;
+}
+
+static esp_err_t spi_flash_chip_mxic_config_host_io_mode(esp_flash_t *chip, uint32_t flags) {
+    // ESP_LOGI(TAG, "configure host %p = %02x %d %u", chip, chip->read_cmd, chip->addr32, chip->dummylen * 2u);
+    return chip->host->driver->configure_host_io_mode(chip->host, chip->read_cmd,
+        chip->addr32 ? 32 : 24,
+        chip->dummylen * 2u,
+	chip->read_mode | SPI_FLASH_CONFIG_CONF_BITS);
 }
 
 static esp_err_t spi_flash_command_mxic_program_page(esp_flash_t *chip, const void *buffer, uint32_t address, uint32_t length)
@@ -147,7 +206,8 @@ static esp_err_t spi_flash_chip_mcix_read(esp_flash_t *chip, void *buffer, uint3
     esp_err_t err = ESP_OK;
 
     // There is no init function so we have to do this on every single read!
-    err = chip->chip_drv->config_host_io_mode(chip, SPI_FLASH_CONFIG_IO_MODE_32B_ADDR);
+    err = spi_flash_chip_mxic_config_host_io_mode(chip, SPI_FLASH_CONFIG_IO_MODE_32B_ADDR);
+    // chip->chip_drv->config_host_io_mode(chip, SPI_FLASH_CONFIG_IO_MODE_32B_ADDR);
     if (err == ESP_ERR_NOT_SUPPORTED) {
         ESP_LOGE(TAG, "configure host io mode failed - unsupported");
     }
@@ -201,5 +261,5 @@ const spi_flash_chip_t esp_flash_chip_mxic = {
     .sus_setup = spi_flash_chip_generic_suspend_cmd_conf,
     .read_unique_id = spi_flash_chip_generic_read_unique_id_none,
     .get_chip_caps = spi_flash_chip_mxic_get_caps,
-    .config_host_io_mode = spi_flash_chip_generic_config_host_io_mode,
+    .config_host_io_mode = spi_flash_chip_mxic_config_host_io_mode,
 };
